@@ -3,3 +3,9 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+.env.local
+.neon
+node_modules/
+neon.ts
+package.json
+package-lock.json

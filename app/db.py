@@ -82,7 +82,7 @@ class Database:
             timeout=20,
             max_idle=120,
             check=AsyncConnectionPool.check_connection,
-            kwargs={"row_factory": dict_row, "connect_timeout": 10},
+            kwargs={"row_factory": dict_row, "connect_timeout": 10, "prepare_threshold": None},
         )
         self._schema_ready = False
         self._schema_lock = asyncio.Lock()
