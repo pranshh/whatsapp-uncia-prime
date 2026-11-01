@@ -33,10 +33,15 @@ class FakeStore:
             s = {"id": self._next, "mobile": mobile, "role": role}
             self._next += 1
             self.sessions[(mobile, role)] = s
-        s.update(status="COLLECTING", step="AWAIT_HI", name=None, email=None, loan_amount=None, tenure_months=None, zip=None, zip_name=None, seq=self._next)
+        s.update(status="COLLECTING", step="CONSENT", name=None, email=None, loan_amount=None, tenure_months=None, zip=None, zip_name=None, seq=self._next)
         self._next += 1
         self.files[s["id"]] = []
         return self._view(s)
+
+    async def opt_out(self, session_id):
+        s = self._by_id(session_id)
+        s.update(status="OPTED_OUT", step="OPTED_OUT", name=None, email=None, loan_amount=None, tenure_months=None, zip=None, zip_name=None)
+        self.files[session_id] = []
 
     async def find_for_sender(self, mobile):
         mine = [s for s in self.sessions.values() if s["mobile"] == mobile]

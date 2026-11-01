@@ -3,11 +3,11 @@ import logging
 
 from .config import Settings
 from .meta import MetaClient, MetaError
-from .util import Inbound, default_filename, is_email, normalize_mobile, parse_amount, parse_tenure, safe_filename
+from .util import Inbound, consent_answer, default_filename, is_email, normalize_mobile, parse_amount, parse_tenure, safe_filename
 
 log = logging.getLogger("whatsapp.chat")
 
-AWAIT_HI, NAME, EMAIL, AMOUNT, TENURE, DOCS, DONE = "AWAIT_HI", "NAME", "EMAIL", "AMOUNT", "TENURE", "DOCS", "DONE"
+CONSENT, AWAIT_HI, NAME, EMAIL, AMOUNT, TENURE, DOCS, DONE = "CONSENT", "AWAIT_HI", "NAME", "EMAIL", "AMOUNT", "TENURE", "DOCS", "DONE"
 
 
 def _is(text: str | None, word: str) -> bool:
@@ -15,7 +15,7 @@ def _is(text: str | None, word: str) -> bool:
 
 
 class ChatService:
-    """The question flow: HI -> name -> email -> loan amount -> tenure -> documents -> DONE (zip). Invalid answers are re-asked."""
+    """The flow: consent (YES / NO) -> name -> email -> loan amount -> tenure -> documents -> DONE (zip). Invalid answers are re-asked."""
 
     def __init__(self, store, meta: MetaClient, settings: Settings):
         self._store = store
@@ -33,30 +33,41 @@ class ChatService:
         text = msg.text.strip() if msg.text else None
         session = await self._store.find_for_sender(mobile)
 
+        if session is not None and session.status == "OPTED_OUT":
+            await self._reply(mobile, "You have opted out. Contact us if you change your mind.")
+            return
+
         if _is(text, "RESTART"):
             if session is None:
                 await self._reply(mobile, "Reply HI to start your loan application.")
                 return
             await self._store.start_session(session.mobile, session.role)
-            await self._reply(mobile, "Your session has been cleared. Reply HI to start again.")
+            await self._reply(mobile, "Your session has been cleared. Please reply YES to continue or NO to opt out.")
             return
 
         if session is None:
             if not _is(text, "HI"):
                 await self._reply(mobile, "Reply HI to start your loan application.")
                 return
-            session = await self._store.start_session(mobile, "A")
-        elif session.status == "DONE":
+            await self._store.start_session(mobile, "A")
+            await self._reply(mobile, "Hi! Please reply YES to continue with your loan application or NO to opt out.")
+            return
+        if session.status == "DONE":
             await self._reply(mobile, "Your application is already submitted. Reply RESTART to begin again.")
             return
 
         step = session.step
-        if step == AWAIT_HI:
-            if not _is(text, "HI"):
-                await self._reply(mobile, "Reply HI to start your loan application.")
-                return
-            await self._store.update(session.id, NAME)
-            await self._reply(mobile, "Hello! Let's get your loan application started.\nWhat is your full name?")
+        if step in (CONSENT, AWAIT_HI):  # AWAIT_HI: rows created before the consent step existed
+            answer = consent_answer(msg)
+            if answer == "YES":
+                await self._store.update(session.id, NAME)
+                await self._reply(mobile, "Great! What is your full name?")
+            elif answer == "NO":
+                await self._store.opt_out(session.id)
+                log.info("Session %s/%s opted out", mobile, session.role)
+                await self._reply(mobile, "No problem, you won't hear from us again about this offer. Thank you!")
+            else:
+                await self._reply(mobile, "Please reply YES to continue or NO to opt out.")
         elif step == NAME:
             if text and 2 <= len(text) <= 100 and any(c.isalpha() for c in text):
                 await self._store.update(session.id, EMAIL, name=text)

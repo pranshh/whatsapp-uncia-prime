@@ -123,8 +123,8 @@ class Database:
         async with self._pool.connection() as conn:
             async with conn.transaction():
                 cur = await conn.execute(
-                    """INSERT INTO sessions (mobile, role, status, step, opt_in_at) VALUES (%s, %s, 'COLLECTING', 'AWAIT_HI', now())
-                       ON CONFLICT (mobile, role) DO UPDATE SET status = 'COLLECTING', step = 'AWAIT_HI', name = NULL, email = NULL, loan_amount = NULL,
+                    """INSERT INTO sessions (mobile, role, status, step, opt_in_at) VALUES (%s, %s, 'COLLECTING', 'CONSENT', now())
+                       ON CONFLICT (mobile, role) DO UPDATE SET status = 'COLLECTING', step = 'CONSENT', name = NULL, email = NULL, loan_amount = NULL,
                          tenure_months = NULL, zip_file_name = NULL, zip_content = NULL, completed_at = NULL, opt_in_at = now(), modified_at = now()
                        RETURNING id""",
                     (mobile, role),
@@ -133,6 +133,16 @@ class Database:
                 await conn.execute("DELETE FROM files WHERE session_id = %s", (session_id,))
             cur = await conn.execute(f"{SESSION_SELECT} WHERE s.id = %s", (session_id,))
             return _session(await cur.fetchone())
+
+    async def opt_out(self, session_id: int) -> None:
+        async with self._pool.connection() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    """UPDATE sessions SET status = 'OPTED_OUT', step = 'OPTED_OUT', name = NULL, email = NULL, loan_amount = NULL, tenure_months = NULL,
+                       zip_file_name = NULL, zip_content = NULL, modified_at = now() WHERE id = %s""",
+                    (session_id,),
+                )
+                await conn.execute("DELETE FROM files WHERE session_id = %s", (session_id,))
 
     async def find_for_sender(self, mobile: str) -> Session | None:
         await self.ensure_schema()

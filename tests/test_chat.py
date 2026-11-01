@@ -31,14 +31,15 @@ async def say(chat, text=None, **kw):
 
 
 async def to_docs(chat):
-    for t in ["hi", "Ravi Kumar", "ravi@example.com", "5,00,000", "36"]:
+    for t in ["hi", "yes", "Ravi Kumar", "ravi@example.com", "5,00,000", "36"]:
         await say(chat, t)
 
 
 async def test_full_flow_with_revalidation(world):
     store, meta, chat = world
-    await say(chat, "HI")
-    assert "full name" in meta.last
+    await say(chat, "HI"); assert "YES to continue" in meta.last and "NO to opt out" in meta.last
+    await say(chat, "maybe"); assert meta.last == "Please reply YES to continue or NO to opt out."
+    await say(chat, "Yes"); assert meta.last == "Great! What is your full name?"
     await say(chat, "A"); assert meta.last == "Please enter your full name."
     await say(chat, "Ravi Kumar"); assert meta.last == "Your email ID?"
     await say(chat, "nope"); assert "valid email" in meta.last
@@ -63,7 +64,7 @@ async def test_full_flow_with_revalidation(world):
     assert sorted(zipfile.ZipFile(io.BytesIO(content)).namelist()) == sorted(["report.pdf", "report (2).pdf", "image_M2.jpg"]) or len(zipfile.ZipFile(io.BytesIO(content)).namelist()) == 3
 
     await say(chat, "hi"); assert "already submitted" in meta.last
-    await say(chat, "restart"); assert "cleared" in meta.last
+    await say(chat, "restart"); assert "cleared" in meta.last and "YES to continue" in meta.last
     after = await store.get_session(MOBILE, "A")
     assert (after.status, after.name, after.file_count, after.has_zip) == ("COLLECTING", None, 0, False)
 
@@ -83,17 +84,54 @@ async def test_no_session_non_hi_and_restart(world):
     assert not store.sessions
 
 
-async def test_started_session_waits_for_hi(world):
+async def test_started_session_waits_in_consent_for_any_message(world):
     store, meta, chat = world
     await store.start_session(MOBILE, "CA")
-    await say(chat, "what"); assert "Reply HI" in meta.last
-    await say(chat, "hi"); assert "full name" in meta.last
+    assert (await store.get_session(MOBILE, "CA")).step == "CONSENT"
+    await say(chat, "what"); assert meta.last == "Please reply YES to continue or NO to opt out."
+    await say(chat, "hi"); assert meta.last == "Please reply YES to continue or NO to opt out."
+    await say(chat, type="image", media_id="M2", mime_type="image/jpeg"); assert meta.last == "Please reply YES to continue or NO to opt out."
+    assert (await store.get_session(MOBILE, "CA")).step == "CONSENT"
+    await say(chat, "YES"); assert meta.last == "Great! What is your full name?"
     assert (await store.get_session(MOBILE, "CA")).step == "NAME"
+
+
+@pytest.mark.parametrize("kw", [
+    {"text": "yes"}, {"text": "YES"}, {"text": " Yes! "},
+    {"type": "button", "text": "Yes", "payload": "Yes"},
+    {"type": "button", "text": "ok", "payload": "YES"},
+    {"type": "interactive", "text": "Yes", "payload": "yes-id"},
+])
+async def test_consent_yes_in_every_shape(world, kw):
+    store, meta, chat = world
+    await store.start_session(MOBILE, "A")
+    await say(chat, kw.pop("text"), **kw)
+    assert meta.last == "Great! What is your full name?"
+    assert (await store.get_session(MOBILE, "A")).step == "NAME"
+
+
+@pytest.mark.parametrize("kw", [{"text": "no"}, {"text": "NO"}, {"text": "No."}, {"type": "button", "text": "No", "payload": "No"}, {"type": "interactive", "text": "No", "payload": "NO"}])
+async def test_consent_no_opts_out_and_stays_quiet(world, kw):
+    store, meta, chat = world
+    await store.start_session(MOBILE, "A")
+    await say(chat, kw.pop("text"), **kw)
+    assert meta.last == "No problem, you won't hear from us again about this offer. Thank you!"
+    s = await store.get_session(MOBILE, "A")
+    assert (s.status, s.name, s.email, s.file_count, s.has_zip) == ("OPTED_OUT", None, None, 0, False)
+    sent_before = len(meta.sent)
+    for word in ["hi", "yes", "restart", "hello"]:
+        await say(chat, word)
+        assert meta.last == "You have opted out. Contact us if you change your mind."
+    assert len(meta.sent) == sent_before + 4 and (await store.get_session(MOBILE, "A")).status == "OPTED_OUT"
+    await store.start_session(MOBILE, "A")
+    assert (await store.get_session(MOBILE, "A")).status == "COLLECTING"
+    await say(chat, "yes"); assert meta.last == "Great! What is your full name?"
 
 
 async def test_media_before_docs_step_reasks_question(world):
     store, meta, chat = world
     await say(chat, "hi")
+    await say(chat, "yes")
     await say(chat, type="document", media_id="M1", filename="a.pdf"); assert meta.last == "Please enter your full name."
 
 
@@ -111,6 +149,6 @@ async def test_active_session_preferred_over_done(world):
     await say(chat, type="document", media_id="M1", filename="a.pdf")
     await say(chat, "done")
     await store.start_session(MOBILE, "CA")
-    await say(chat, "hi")
+    await say(chat, "yes")
     assert "full name" in meta.last
     assert (await store.get_session(MOBILE, "CA")).step == "NAME"

@@ -25,6 +25,7 @@ class Inbound:
     media_id: str | None = None
     filename: str | None = None
     mime_type: str | None = None
+    payload: str | None = None
 
 
 def normalize_mobile(raw: str | None, default_country_code: str) -> str | None:
@@ -60,14 +61,29 @@ def parse_webhook(payload: dict) -> list[Inbound]:
                 message_id, sender, kind = m.get("id"), m.get("from"), m.get("type")
                 if not (message_id and sender and kind):
                     continue
-                text = media_id = filename = mime = None
+                text = media_id = filename = mime = payload = None
                 if kind == "text":
                     text = (m.get("text") or {}).get("body")
                 elif kind in ("image", "document"):
                     media = m.get(kind) or {}
                     media_id, filename, mime = media.get("id"), media.get("filename"), media.get("mime_type")
-                result.append(Inbound(message_id, sender, kind, text, media_id, filename, mime))
+                elif kind == "button":
+                    button = m.get("button") or {}
+                    text, payload = button.get("text"), button.get("payload")
+                elif kind == "interactive":
+                    interactive = m.get("interactive") or {}
+                    reply = interactive.get("button_reply") or interactive.get("list_reply") or {}
+                    text, payload = reply.get("title"), reply.get("id")
+                result.append(Inbound(message_id, sender, kind, text, media_id, filename, mime, payload))
     return result
+
+
+def consent_answer(msg: Inbound) -> str | None:
+    """'YES' or 'NO' from a typed text or a quick-reply button (text or payload), ignoring case, spaces and trailing punctuation; otherwise None."""
+    for value in (msg.text, msg.payload):
+        if value and value.strip().rstrip(".! ").casefold() in ("yes", "no"):
+            return value.strip().rstrip(".! ").upper()
+    return None
 
 
 def is_email(text: str | None) -> bool:

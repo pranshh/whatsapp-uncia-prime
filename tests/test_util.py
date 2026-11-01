@@ -11,6 +11,7 @@ from app.util import (
     parse_amount,
     parse_tenure,
     parse_webhook,
+    consent_answer,
     safe_filename,
     unique_name,
     verify_signature,
@@ -62,6 +63,20 @@ def test_filenames():
     assert unique_name("Report.PDF", {"report.pdf"}) == "Report (2).PDF"
     assert default_filename(Inbound("m", "s", "image", media_id="1234567890", mime_type="image/png")) == "image_34567890.png"
     assert default_filename(Inbound("m", "s", "image", media_id="123")) == "image_123.jpg"
+
+
+def test_consent_answer_and_button_parsing():
+    payload = {"entry": [{"changes": [{"value": {"messages": [
+        {"id": "b", "from": "1", "type": "button", "button": {"text": "Yes", "payload": "YES_PAYLOAD"}},
+        {"id": "i", "from": "1", "type": "interactive", "interactive": {"type": "button_reply", "button_reply": {"id": "no", "title": "No"}}},
+        {"id": "l", "from": "1", "type": "interactive", "interactive": {"type": "list_reply", "list_reply": {"id": "x", "title": "Maybe"}}},
+    ]}}]}]}
+    b, i, l = parse_webhook(payload)
+    assert (b.text, b.payload, i.text, i.payload) == ("Yes", "YES_PAYLOAD", "No", "no")
+    assert consent_answer(b) == "YES" and consent_answer(i) == "NO" and consent_answer(l) is None
+    assert consent_answer(Inbound("m", "s", "text", " yEs. ")) == "YES"
+    assert consent_answer(Inbound("m", "s", "text", "yes please")) is None
+    assert consent_answer(Inbound("m", "s", "image")) is None
 
 
 def test_parse_webhook():

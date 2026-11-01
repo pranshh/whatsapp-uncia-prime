@@ -5,15 +5,24 @@ FastAPI service that runs a WhatsApp (Meta Cloud API) chat collecting an applica
 ## API (all under `/api/whatsapp`)
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/start` | `{"mobile","role"?}` role `A` (default) or `CA`; sends the template, creates/resets the session |
+| POST | `/start` | `{"mobile","role"?}` role `A` (default) or `CA`; creates/resets the session in step CONSENT and sends the template (`uncia_loan_offer_intro`, Yes/No buttons) |
 | GET | `/webhook` | Meta verification: returns `hub.challenge` as text/plain when `hub.verify_token` matches, else 403 |
 | POST | `/webhook` | Meta messages; `X-Hub-Signature-256` checked (401 if bad), answers 200 at once, processed in the background, duplicate message ids ignored |
-| GET | `/session?mobile=&role=` | `{ok, status, name, email, loan_amount, tenure_months, zip_url, file_count}`, `{ok:false}` if none |
+| GET | `/session?mobile=&role=` | `{ok, status, name, email, loan_amount, tenure_months, zip_url, file_count}`; status `COLLECTING`, `DONE` or `OPTED_OUT`; `{ok:false}` if none |
 | GET | `/zip?mobile=&role=` | the zip, 404 until DONE |
 | GET | `/health` | liveness, always 200 (Koyeb probe + uptime pinger) |
 | GET | `/health/ready` | database, config, Meta API; 200 or 503 with a reason per check |
 
 `/health` and `/health/ready` also answer without the `/api/whatsapp` prefix. CORS allows only `ALLOWED_ORIGIN`.
+
+## Consent step
+`/start` puts the session in CONSENT, so the customer never has to say Hi first: the next inbound message from that number is the answer, typed or a quick-reply button (message type `button` or `interactive`, text or payload).
+- YES (any case) -> "Great! What is your full name?" and the normal flow (email, loan amount, tenure, documents, DONE).
+- NO -> "No problem, you won't hear from us again about this offer. Thank you!", status `OPTED_OUT`. Any later message from that number gets only "You have opted out. Contact us if you change your mind." (RESTART and Hi do not reopen it). Only a new `POST /start` reopens it.
+- Anything else -> "Please reply YES to continue or NO to opt out." and stays in CONSENT.
+- A Hi from a number with no session starts a session in CONSENT too.
+
+The template's language must match how it is registered in Meta (`START_TEMPLATE_LANGUAGE`, currently `en`), and it must be Active before `/start` can send it.
 
 ## Configuration
 Environment variables only (see `.env.example`). Never commit values. `GET /api/whatsapp/health/ready` lists which required ones are missing, names only.

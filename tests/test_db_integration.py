@@ -30,7 +30,7 @@ async def test_full_flow_on_real_postgres():
 
     try:
         await db.start_session(MOBILE, "A")
-        for t in ["hi", "Test User", "test@example.com", "5,00,000", "36"]:
+        for t in ["yes", "Test User", "test@example.com", "5,00,000", "36"]:
             await say(t)
         await say(type="document", media_id="M1", filename="report.pdf", mime_type="application/pdf")
         await say(type="document", media_id="M3", filename="report.pdf")
@@ -56,6 +56,16 @@ async def test_full_flow_on_real_postgres():
         s = await db.get_session(MOBILE, "A")
         assert (s.status, s.name, s.file_count, s.has_zip) == ("COLLECTING", None, 0, False)
         assert await db.get_zip(MOBILE, "A") is None
+        assert (await db.get_session(MOBILE, "A")).step == "CONSENT"
+
+        await say("maybe"); assert meta.sent[-1][1] == "Please reply YES to continue or NO to opt out."
+        await say("No")
+        assert meta.sent[-1][1] == "No problem, you won't hear from us again about this offer. Thank you!"
+        assert (await db.get_session(MOBILE, "A")).status == "OPTED_OUT"
+        count = len(meta.sent)
+        await say("yes")
+        assert meta.sent[-1][1] == "You have opted out. Contact us if you change your mind." and len(meta.sent) == count + 1
+        assert (await db.start_session(MOBILE, "A")).status == "COLLECTING"
         await db.ping()
     finally:
         async with db._pool.connection() as conn:
