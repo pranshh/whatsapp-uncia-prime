@@ -106,13 +106,21 @@ def create_app(settings: Settings | None = None, store=None, meta=None) -> FastA
         role = normalize_role(body.role)
         if not role:
             return JSONResponse({"ok": False, "error": "role must be A or CA."}, status_code=400)
-        if not settings.start_template_name:
-            return JSONResponse({"ok": False, "error": "START_TEMPLATE_NAME is not configured."}, status_code=500)
         await request.app.state.store.start_session(mobile, role)
+        intro = ("Hello! \U0001F44B Greetings from Uncia.\n"
+                 "We've got good news for you! You may qualify for a loan offer. \U0001F4B0\n"
+                 "Would you like to know more?\n"
+                 "Reply YES to continue or NO to opt out.")
         try:
-            await request.app.state.meta.send_template(mobile, settings.start_template_name, settings.start_template_language)
-        except MetaError as ex:
-            return JSONResponse({"ok": False, "error": str(ex)}, status_code=502)
+            # Inside the customer's 24-hour window plain text is allowed, so no template is needed.
+            await request.app.state.meta.send_text(mobile, intro)
+        except MetaError as text_error:
+            if not settings.start_template_name:
+                return JSONResponse({"ok": False, "error": str(text_error)}, status_code=502)
+            try:
+                await request.app.state.meta.send_template(mobile, settings.start_template_name, settings.start_template_language)
+            except MetaError as ex:
+                return JSONResponse({"ok": False, "error": str(ex)}, status_code=502)
         return {"ok": True}
 
     @app.get(f"{PREFIX}/webhook")
